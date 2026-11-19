@@ -9,7 +9,7 @@
 
 <style>
 :root {
-  color-scheme: dark;
+  color-scheme:dark;
   --bg:#101319;
   --panel:#191f29;
   --surface:#222a36;
@@ -21,7 +21,7 @@
 :root[data-theme="light"] {
   color-scheme:light;
   --bg:#f5f6f8;
-  --panel:#ffffff;
+  --panel:#fff;
   --surface:#edf0f5;
   --text:#171b23;
   --muted:#727d8d;
@@ -116,8 +116,11 @@ nav button.active {
   border-bottom:1px solid var(--border);
 }
 .avatar {
-  width:42px;height:42px;flex-shrink:0;
-  display:grid;place-items:center;
+  width:42px;
+  height:42px;
+  flex-shrink:0;
+  display:grid;
+  place-items:center;
   border-radius:50%;
   background:var(--surface);
   color:var(--accent);
@@ -169,8 +172,7 @@ select {
   color:var(--text);
   border:1px solid var(--border);
 }
-#status,#profileStatus,#messageStatus {
-  color:var(--muted);
+.statusText {
   font-size:13px;
   min-height:20px;
   overflow-wrap:anywhere;
@@ -182,7 +184,10 @@ select {
     flex-direction:row;
     overflow-x:auto;
   }
-  nav button {white-space:nowrap;text-align:center}
+  nav button {
+    white-space:nowrap;
+    text-align:center;
+  }
   .content {min-height:400px}
 }
 </style>
@@ -206,7 +211,7 @@ select {
 
     <button class="full" id="authButton">Log in</button>
     <button class="full secondary" id="switchAuth">Create an account</button>
-    <p id="status"></p>
+    <p id="status" class="statusText muted"></p>
   </div>
 </div>
 
@@ -216,7 +221,7 @@ select {
     <p class="muted">Choose your ChatHub username.</p>
     <input id="setupUsername" placeholder="Username">
     <button class="full" id="saveProfile">Continue</button>
-    <p id="profileStatus"></p>
+    <p id="profileStatus" class="statusText muted"></p>
   </div>
 </div>
 
@@ -279,6 +284,16 @@ select {
           </div>
         </div>
 
+        <div class="settingRow" style="display:block">
+          <strong>Username</strong>
+          <div class="muted small">Change your public username.</div>
+          <input id="newUsername" placeholder="New username" maxlength="20">
+          <p id="usernameAvailability" class="statusText muted">
+            Your username is visible to other users.
+          </p>
+          <button id="saveUsername">Save username</button>
+        </div>
+
         <button id="logoutButton" class="secondary full">Log out</button>
       </section>
 
@@ -290,7 +305,7 @@ select {
           <input id="messageInput" placeholder="Write a message..." maxlength="5000">
           <button type="submit">Send</button>
         </form>
-        <p id="messageStatus" class="muted small"></p>
+        <p id="messageStatus" class="statusText muted"></p>
       </section>
 
     </main>
@@ -302,17 +317,32 @@ import {initializeApp} from
  "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 
 import {
- getAuth,onAuthStateChanged,createUserWithEmailAndPassword,
- signInWithEmailAndPassword,signOut
+ getAuth,
+ onAuthStateChanged,
+ createUserWithEmailAndPassword,
+ signInWithEmailAndPassword,
+ signOut
 } from
  "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 
 import {
- getFirestore,collection,doc,setDoc,getDoc,getDocs,
- query,where,onSnapshot,addDoc,serverTimestamp,orderBy
+ getFirestore,
+ collection,
+ doc,
+ setDoc,
+ getDoc,
+ getDocs,
+ query,
+ where,
+ onSnapshot,
+ addDoc,
+ serverTimestamp,
+ orderBy,
+ runTransaction
 } from
  "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
+// Firebase configuration
 const firebaseConfig = {
  apiKey: "AIzaSyCfY261bu8-qzxV6WGTqp8PqKu0D-i406Y",
  authDomain: "chathub-75a47.firebaseapp.com",
@@ -322,36 +352,49 @@ const firebaseConfig = {
  appId: "1:663781705692:web:78fb223c742db8d397b119"
 };
 
-const app=initializeApp(firebaseConfig);
-const auth=getAuth(app);
-const db=getFirestore(app);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-const $=id=>document.getElementById(id);
+const $ = id => document.getElementById(id);
 
-let currentUser=null;
-let currentProfile=null;
-let currentChat=null;
-let isRegister=false;
-let stopContacts=null;
-let stopChats=null;
-let stopMessages=null;
+let currentUser = null;
+let currentProfile = null;
+let currentChat = null;
+let isRegister = false;
 
-function status(message) {
- $("status").textContent=message;
-}
+let stopContacts = null;
+let stopChats = null;
+let stopMessages = null;
 
+let usernameCheckTimer = null;
+let usernameCheckVersion = 0;
+
+// General error display
 function showError(element,error,stage) {
  console.error(stage,error);
- element.textContent=
+ element.textContent =
   stage+" — "+(error.code||"Error")+": "+error.message;
 }
 
+function status(message) {
+ $("status").textContent = message;
+}
+
+// Theme
 function applyTheme() {
- const saved=localStorage.getItem("chathub-theme")||"system";
- const systemDark=window.matchMedia("(prefers-color-scheme: dark)").matches;
- const theme=saved==="system"?(systemDark?"dark":"light"):saved;
- document.documentElement.dataset.theme=theme;
- if($("themeSelect")) $("themeSelect").value=saved;
+ const saved = localStorage.getItem("chathub-theme") || "system";
+ const systemDark =
+  window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+ const theme =
+  saved === "system" ? (systemDark ? "dark" : "light") : saved;
+
+ document.documentElement.dataset.theme = theme;
+
+ if($("themeSelect")) {
+  $("themeSelect").value = saved;
+ }
 }
 
 applyTheme();
@@ -363,15 +406,17 @@ $("themeSelect").addEventListener("change",e=>{
 
 window.matchMedia("(prefers-color-scheme: dark)")
  .addEventListener("change",()=>{
-  if((localStorage.getItem("chathub-theme")||"system")==="system")
+  if((localStorage.getItem("chathub-theme")||"system")==="system") {
    applyTheme();
+  }
  });
 
+// Navigation
 function showPage(name) {
  ["contacts","search","chats","settings","conversation"]
- .forEach(page=>{
-  $(`${page}Page`).classList.toggle("hidden",page!==name);
- });
+  .forEach(page=>{
+   $(`${page}Page`).classList.toggle("hidden",page!==name);
+  });
 
  document.querySelectorAll("nav button").forEach(button=>{
   button.classList.toggle("active",button.dataset.page===name);
@@ -379,32 +424,35 @@ function showPage(name) {
 }
 
 document.querySelectorAll("nav button").forEach(button=>{
- button.addEventListener("click",()=>showPage(button.dataset.page));
+ button.addEventListener("click",()=>{
+  showPage(button.dataset.page);
+ });
 });
 
+// UI item
 function makeItem(name,detail,buttonText,action) {
- const item=document.createElement("div");
- item.className="item";
+ const item = document.createElement("div");
+ item.className = "item";
 
- const avatar=document.createElement("div");
- avatar.className="avatar";
- avatar.textContent=(name||"?").charAt(0).toUpperCase();
+ const avatar = document.createElement("div");
+ avatar.className = "avatar";
+ avatar.textContent = (name||"?").charAt(0).toUpperCase();
 
- const info=document.createElement("div");
- info.className="itemInfo";
+ const info = document.createElement("div");
+ info.className = "itemInfo";
 
- const strong=document.createElement("strong");
- strong.textContent=name;
+ const strong = document.createElement("strong");
+ strong.textContent = name;
 
- const small=document.createElement("small");
- small.textContent=detail||"";
+ const small = document.createElement("small");
+ small.textContent = detail||"";
 
  info.append(strong,small);
  item.append(avatar,info);
 
  if(buttonText) {
-  const button=document.createElement("button");
-  button.textContent=buttonText;
+  const button = document.createElement("button");
+  button.textContent = buttonText;
   button.addEventListener("click",action);
   item.append(button);
  }
@@ -412,65 +460,97 @@ function makeItem(name,detail,buttonText,action) {
  return item;
 }
 
+// Stop Firebase listeners
 function stopListeners() {
  [stopContacts,stopChats,stopMessages].forEach(stop=>{
-  if(stop)stop();
+  if(stop) stop();
  });
- stopContacts=stopChats=stopMessages=null;
+
+ stopContacts = null;
+ stopChats = null;
+ stopMessages = null;
 }
 
-async function createProfile(username) {
- username=username.trim().replace(/^@/,"");
+// Username validation
+function validUsername(username) {
+ return /^[a-zA-Z0-9_]{3,20}$/.test(username);
+}
 
- if(!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+// Create a new profile and reserve its username
+async function createProfile(username) {
+ username = username.trim().replace(/^@/,"");
+
+ if(!validUsername(username)) {
   throw new Error("Use 3–20 letters, numbers or underscores.");
  }
 
- const usernameLower=username.toLowerCase();
+ const lower = username.toLowerCase();
+ const usernameRef = doc(db,"usernames",lower);
+ const profileRef = doc(db,"profiles",currentUser.uid);
 
- const existing=await getDocs(query(
-  collection(db,"profiles"),
-  where("usernameLower","==",usernameLower)
- ));
+ await runTransaction(db,async transaction=>{
+  const reservation = await transaction.get(usernameRef);
 
- if(!existing.empty) {
-  throw new Error("That username is already taken.");
- }
+  const matchingProfiles = await transaction.get(query(
+   collection(db,"profiles"),
+   where("usernameLower","==",lower)
+  ));
 
- await setDoc(doc(db,"profiles",currentUser.uid),{
-  uid:currentUser.uid,
-  username,
-  usernameLower,
-  email:currentUser.email,
-  createdAt:serverTimestamp()
+  if(reservation.exists() &&
+     reservation.data().uid !== currentUser.uid) {
+   throw new Error("That username is already taken.");
+  }
+
+  if(matchingProfiles.docs.some(d=>d.id!==currentUser.uid)) {
+   throw new Error("That username is already taken.");
+  }
+
+  transaction.set(usernameRef,{
+   uid:currentUser.uid,
+   usernameLower:lower,
+   createdAt:serverTimestamp()
+  });
+
+  transaction.set(profileRef,{
+   uid:currentUser.uid,
+   username,
+   usernameLower:lower,
+   email:currentUser.email,
+   createdAt:serverTimestamp()
+  });
  });
 
- currentProfile={
+ currentProfile = {
   uid:currentUser.uid,
   username,
+  usernameLower:lower,
   email:currentUser.email
  };
 
  showApp();
 }
 
+// Show app
 async function showApp() {
  $("authView").classList.add("hidden");
  $("profileSetup").classList.add("hidden");
  $("appView").classList.remove("hidden");
 
- $("currentUsername").textContent="@"+currentProfile.username;
- $("settingsEmail").textContent=currentUser.email;
+ $("currentUsername").textContent = "@"+currentProfile.username;
+ $("settingsEmail").textContent = currentUser.email;
 
  startContacts();
  startChats();
+
  showPage("contacts");
 }
 
+// Authentication
 onAuthStateChanged(auth,async user=>{
  stopListeners();
- currentUser=user;
- currentProfile=null;
+
+ currentUser = user;
+ currentProfile = null;
 
  if(!user) {
   $("appView").classList.add("hidden");
@@ -480,11 +560,11 @@ onAuthStateChanged(auth,async user=>{
  }
 
  try {
-  const profile=await getDoc(doc(db,"profiles",user.uid));
+  const profile = await getDoc(doc(db,"profiles",user.uid));
 
   if(profile.exists()) {
-   currentProfile=profile.data();
-   showApp();
+   currentProfile = profile.data();
+   await showApp();
   } else {
    $("authView").classList.add("hidden");
    $("appView").classList.add("hidden");
@@ -495,18 +575,28 @@ onAuthStateChanged(auth,async user=>{
  }
 });
 
+// Switch login/register
 $("switchAuth").addEventListener("click",()=>{
- isRegister=!isRegister;
- $("authHeading").textContent=isRegister?"Create your account":"Welcome back";
- $("authButton").textContent=isRegister?"Create account":"Log in";
- $("switchAuth").textContent=isRegister?"Back to login":"Create an account";
+ isRegister = !isRegister;
+
+ $("authHeading").textContent =
+  isRegister ? "Create your account" : "Welcome back";
+
+ $("authButton").textContent =
+  isRegister ? "Create account" : "Log in";
+
+ $("switchAuth").textContent =
+  isRegister ? "Back to login" : "Create an account";
+
  $("usernameField").classList.toggle("hidden",!isRegister);
+
  status("");
 });
 
+// Login/register button
 $("authButton").addEventListener("click",async()=>{
- const email=$("email").value.trim().toLowerCase();
- const password=$("password").value;
+ const email = $("email").value.trim().toLowerCase();
+ const password = $("password").value;
 
  status("Please wait...");
 
@@ -516,45 +606,58 @@ $("authButton").addEventListener("click",async()=>{
     throw new Error("Choose a username first.");
    }
 
-   const result=await createUserWithEmailAndPassword(auth,email,password);
-   currentUser=result.user;
+   const result = await createUserWithEmailAndPassword(
+    auth,email,password
+   );
+
+   currentUser = result.user;
+
    await createProfile($("username").value);
+
   } else {
    await signInWithEmailAndPassword(auth,email,password);
   }
+
  } catch(error) {
   status(error.code ? error.code+": "+error.message : error.message);
  }
 });
 
+// Complete profile setup
 $("saveProfile").addEventListener("click",async()=>{
  try {
-  $("profileStatus").textContent="Saving...";
+  $("profileStatus").textContent = "Saving...";
   await createProfile($("setupUsername").value);
  } catch(error) {
   showError($("profileStatus"),error,"Saving profile");
  }
 });
 
+// Search users
 async function searchUsers() {
- const term=$("userSearch").value.trim().replace(/^@/,"");
- const results=$("searchResults");
+ const term = $("userSearch").value.trim().replace(/^@/,"");
+ const results = $("searchResults");
+
  results.replaceChildren();
 
  if(term.length<2) {
-  results.textContent="Enter at least two characters.";
+  results.textContent = "Enter at least two characters.";
   return;
  }
 
  try {
-  const [byUsername,byEmail]=await Promise.all([
-   getDocs(query(collection(db,"profiles"),
-    where("usernameLower","==",term.toLowerCase()))),
-   getDocs(query(collection(db,"profiles"),
-    where("email","==",term.toLowerCase())))
+  const [byUsername,byEmail] = await Promise.all([
+   getDocs(query(
+    collection(db,"profiles"),
+    where("usernameLower","==",term.toLowerCase())
+   )),
+   getDocs(query(
+    collection(db,"profiles"),
+    where("email","==",term.toLowerCase())
+   ))
   ]);
 
-  const found=new Map();
+  const found = new Map();
 
   [...byUsername.docs,...byEmail.docs].forEach(d=>{
    found.set(d.id,d.data());
@@ -563,75 +666,90 @@ async function searchUsers() {
   found.delete(currentUser.uid);
 
   if(found.size===0) {
-   results.textContent="No registered users found.";
+   results.textContent = "No registered users found.";
    return;
   }
 
   for(const person of found.values()) {
-   const contact=await getDoc(
-    doc(db,"users",currentUser.uid,"contacts",person.uid)
+   const contactRef = doc(
+    db,"users",currentUser.uid,"contacts",person.uid
    );
+
+   const contact = await getDoc(contactRef);
 
    results.append(makeItem(
     person.username,
     person.email,
-    contact.exists()?"Added":"Add",
+    contact.exists() ? "Added" : "Add",
     async()=>{
-     if(contact.exists())return;
+     if(contact.exists()) return;
 
      try {
-      await setDoc(
-       doc(db,"users",currentUser.uid,"contacts",person.uid),
-       {
-        uid:person.uid,
-        username:person.username,
-        email:person.email,
-        createdAt:serverTimestamp()
-       }
-      );
+      await setDoc(contactRef,{
+       uid:person.uid,
+       username:person.username,
+       email:person.email,
+       createdAt:serverTimestamp()
+      });
 
       searchUsers();
+
      } catch(error) {
-      results.textContent=
-       "Adding contact failed: "+(error.code||"Error")+" — "+error.message;
+      showError(results,error,"Adding contact");
      }
     }
    ));
   }
+
  } catch(error) {
-  results.textContent=
-   "Search failed: "+(error.code||"Error")+" — "+error.message;
+  showError(results,error,"Searching users");
  }
 }
 
 $("searchButton").addEventListener("click",searchUsers);
 
 $("userSearch").addEventListener("keydown",e=>{
- if(e.key==="Enter")searchUsers();
+ if(e.key==="Enter") searchUsers();
 });
 
+// Contacts
 function startContacts() {
- stopContacts=onSnapshot(
+ stopContacts = onSnapshot(
   collection(db,"users",currentUser.uid,"contacts"),
-  snapshot=>{
-   const list=$("contactsList");
+  async snapshot=>{
+   const list = $("contactsList");
    list.replaceChildren();
 
    if(snapshot.empty) {
-    list.textContent="No contacts yet. Find someone to get started.";
+    list.textContent =
+     "No contacts yet. Find someone to get started.";
     return;
    }
 
-   snapshot.forEach(contact=>{
-    const person=contact.data();
+   for(const contactDoc of snapshot.docs) {
+    const person = contactDoc.data();
 
-    list.append(makeItem(
-     person.username,
-     person.email,
-     "Message",
-     ()=>openChat(person)
-    ));
-   });
+    try {
+     // Always get the latest username from the profile
+     const profile = await getDoc(
+      doc(db,"profiles",person.uid)
+     );
+
+     const latestPerson = profile.exists()
+      ? profile.data()
+      : person;
+
+     list.append(makeItem(
+      latestPerson.username,
+      latestPerson.email,
+      "Message",
+      ()=>openChat(latestPerson)
+     ));
+
+    } catch(error) {
+     console.error("Loading contact profile:",error);
+    }
+   }
   },
   error=>{
    showError($("contactsList"),error,"Loading contacts");
@@ -639,38 +757,49 @@ function startContacts() {
  );
 }
 
+// Conversations list
 function startChats() {
- stopChats=onSnapshot(
+ stopChats = onSnapshot(
   query(
    collection(db,"chats"),
    where("members","array-contains",currentUser.uid)
   ),
-  snapshot=>{
-   const list=$("chatList");
+  async snapshot=>{
+   const list = $("chatList");
    list.replaceChildren();
 
    if(snapshot.empty) {
-    list.textContent="No conversations yet. Add a contact to start chatting.";
+    list.textContent =
+     "No conversations yet. Add a contact to start chatting.";
     return;
    }
 
-   snapshot.forEach(chatDoc=>{
-    const chat=chatDoc.data();
-    const otherId=chat.members.find(id=>id!==currentUser.uid);
+   for(const chatDoc of snapshot.docs) {
+    const chat = chatDoc.data();
+    const otherId = chat.members.find(
+     id=>id!==currentUser.uid
+    );
 
-    getDoc(doc(db,"profiles",otherId)).then(profile=>{
-     if(!profile.exists())return;
+    try {
+     const profile = await getDoc(
+      doc(db,"profiles",otherId)
+     );
+
+     if(!profile.exists()) continue;
+
+     const person = profile.data();
 
      list.append(makeItem(
-      profile.data().username,
+      person.username,
       chat.lastMessage||"Start a conversation",
       "Open",
-      ()=>openChat(profile.data())
+      ()=>openChat(person)
      ));
-    }).catch(error=>{
+
+    } catch(error) {
      showError(list,error,"Loading chat profile");
-    });
-   });
+    }
+   }
   },
   error=>{
    showError($("chatList"),error,"Loading conversations");
@@ -678,12 +807,14 @@ function startChats() {
  );
 }
 
+// Open a conversation
 async function openChat(person) {
- const messageStatus=$("messageStatus");
- messageStatus.textContent="Opening conversation...";
+ const messageStatus = $("messageStatus");
 
- $("conversationTitle").textContent=person.username;
+ messageStatus.textContent = "Opening conversation...";
+ $("conversationTitle").textContent = person.username;
  $("messages").replaceChildren();
+
  showPage("conversation");
 
  try {
@@ -691,16 +822,16 @@ async function openChat(person) {
    throw new Error("This contact is missing its user ID.");
   }
 
-  const members=[currentUser.uid,person.uid].sort();
-  const chatId=members.join("_");
-  const chatRef=doc(db,"chats",chatId);
+  const members = [currentUser.uid,person.uid].sort();
+  const chatId = members.join("_");
+  const chatRef = doc(db,"chats",chatId);
 
-  messageStatus.textContent="Checking conversation...";
+  messageStatus.textContent = "Checking conversation...";
 
-  const existing=await getDoc(chatRef);
+  const existing = await getDoc(chatRef);
 
   if(!existing.exists()) {
-   messageStatus.textContent="Creating conversation...";
+   messageStatus.textContent = "Creating conversation...";
 
    await setDoc(chatRef,{
     members,
@@ -709,32 +840,33 @@ async function openChat(person) {
    });
   }
 
-  currentChat=chatId;
-  messageStatus.textContent="";
+  currentChat = chatId;
+  messageStatus.textContent = "";
 
-  if(stopMessages)stopMessages();
+  if(stopMessages) stopMessages();
 
-  stopMessages=onSnapshot(
+  stopMessages = onSnapshot(
    query(
     collection(db,"chats",chatId,"messages"),
     orderBy("createdAt","asc")
    ),
    snapshot=>{
-    const box=$("messages");
+    const box = $("messages");
     box.replaceChildren();
 
     snapshot.forEach(messageDoc=>{
-     const message=messageDoc.data();
-     const bubble=document.createElement("div");
+     const message = messageDoc.data();
+     const bubble = document.createElement("div");
 
-     bubble.className="bubble"+
-      (message.senderId===currentUser.uid?" mine":"");
+     bubble.className =
+      "bubble"+
+      (message.senderId===currentUser.uid ? " mine" : "");
 
-     bubble.textContent=message.text;
+     bubble.textContent = message.text;
      box.append(bubble);
     });
 
-    box.scrollTop=box.scrollHeight;
+    box.scrollTop = box.scrollHeight;
    },
    error=>{
     showError(messageStatus,error,"Loading messages");
@@ -742,28 +874,30 @@ async function openChat(person) {
   );
 
  } catch(error) {
-  currentChat=null;
+  currentChat = null;
   showError(messageStatus,error,"Opening conversation");
  }
 }
 
+// Send message
 $("messageForm").addEventListener("submit",async e=>{
  e.preventDefault();
 
- const text=$("messageInput").value.trim();
+ const messageText = $("messageInput").value.trim();
 
- if(!text||!currentChat)return;
+ if(!messageText || !currentChat) return;
 
- const sendButton=$("messageForm").querySelector("button");
- sendButton.disabled=true;
- $("messageStatus").textContent="Sending...";
+ const button = $("messageForm").querySelector("button");
+
+ button.disabled = true;
+ $("messageStatus").textContent = "Sending...";
 
  try {
   await addDoc(
    collection(db,"chats",currentChat,"messages"),
    {
     senderId:currentUser.uid,
-    text,
+    text:messageText,
     createdAt:serverTimestamp()
    }
   );
@@ -771,30 +905,184 @@ $("messageForm").addEventListener("submit",async e=>{
   await setDoc(
    doc(db,"chats",currentChat),
    {
-    lastMessage:text,
+    lastMessage:messageText,
     lastMessageAt:serverTimestamp()
    },
    {merge:true}
   );
 
-  $("messageInput").value="";
-  $("messageStatus").textContent="";
+  $("messageInput").value = "";
+  $("messageStatus").textContent = "";
 
  } catch(error) {
   showError($("messageStatus"),error,"Sending message");
  } finally {
-  sendButton.disabled=false;
+  button.disabled = false;
  }
 });
 
+// Back to conversations
 $("backButton").addEventListener("click",()=>{
- if(stopMessages)stopMessages();
- stopMessages=null;
- currentChat=null;
- $("messageStatus").textContent="";
+ if(stopMessages) stopMessages();
+
+ stopMessages = null;
+ currentChat = null;
+
+ $("messageStatus").textContent = "";
  showPage("chats");
 });
 
+// Username availability
+$("newUsername").addEventListener("input",()=>{
+ clearTimeout(usernameCheckTimer);
+
+ const version = ++usernameCheckVersion;
+ const username = $("newUsername").value.trim().replace(/^@/,"");
+ const output = $("usernameAvailability");
+
+ output.style.color = "var(--muted)";
+
+ if(!validUsername(username)) {
+  output.textContent =
+   "Use 3–20 letters, numbers or underscores.";
+  return;
+ }
+
+ if(username.toLowerCase()===currentProfile.username.toLowerCase()) {
+  output.textContent = "That's already your username.";
+  return;
+ }
+
+ output.textContent = "Checking availability...";
+
+ usernameCheckTimer = setTimeout(async()=>{
+  try {
+   const lower = username.toLowerCase();
+
+   const [reservation,profiles] = await Promise.all([
+    getDoc(doc(db,"usernames",lower)),
+    getDocs(query(
+     collection(db,"profiles"),
+     where("usernameLower","==",lower)
+    ))
+   ]);
+
+   if(version!==usernameCheckVersion) return;
+
+   const taken =
+    (reservation.exists() &&
+     reservation.data().uid!==currentUser.uid) ||
+    profiles.docs.some(d=>d.id!==currentUser.uid);
+
+   if(taken) {
+    output.textContent = "Username is already taken.";
+    output.style.color = "#ef6464";
+   } else {
+    output.textContent = "Username is available!";
+    output.style.color = "#36bd80";
+   }
+
+  } catch(error) {
+   if(version!==usernameCheckVersion) return;
+
+   showError(output,error,"Checking username");
+  }
+ },400);
+});
+
+// Save username
+$("saveUsername").addEventListener("click",async()=>{
+ const button = $("saveUsername");
+ const output = $("usernameAvailability");
+
+ const username = $("newUsername").value.trim().replace(/^@/,"");
+ const lower = username.toLowerCase();
+
+ if(!validUsername(username)) {
+  output.textContent =
+   "Use 3–20 letters, numbers or underscores.";
+  return;
+ }
+
+ if(lower===currentProfile.username.toLowerCase()) {
+  output.textContent = "That's already your username.";
+  return;
+ }
+
+ button.disabled = true;
+ button.textContent = "Saving...";
+ output.textContent = "Saving username...";
+
+ try {
+  const newRef = doc(db,"usernames",lower);
+  const oldLower = currentProfile.username.toLowerCase();
+  const oldRef = doc(db,"usernames",oldLower);
+  const profileRef = doc(db,"profiles",currentUser.uid);
+
+  await runTransaction(db,async transaction=>{
+   const newReservation = await transaction.get(newRef);
+   const oldReservation = await transaction.get(oldRef);
+   const profile = await transaction.get(profileRef);
+
+   const matchingProfiles = await transaction.get(query(
+    collection(db,"profiles"),
+    where("usernameLower","==",lower)
+   ));
+
+   if(!profile.exists()) {
+    throw new Error("Your profile could not be found.");
+   }
+
+   if(newReservation.exists() &&
+      newReservation.data().uid!==currentUser.uid) {
+    throw new Error("That username is already taken.");
+   }
+
+   if(matchingProfiles.docs.some(d=>d.id!==currentUser.uid)) {
+    throw new Error("That username is already taken.");
+   }
+
+   transaction.set(newRef,{
+    uid:currentUser.uid,
+    usernameLower:lower,
+    createdAt:serverTimestamp()
+   });
+
+   if(oldLower!==lower &&
+      oldReservation.exists() &&
+      oldReservation.data().uid===currentUser.uid) {
+    transaction.delete(oldRef);
+   }
+
+   transaction.update(profileRef,{
+    username,
+    usernameLower:lower,
+    updatedAt:serverTimestamp()
+   });
+  });
+
+  currentProfile.username = username;
+  currentProfile.usernameLower = lower;
+
+  $("currentUsername").textContent = "@"+username;
+  $("newUsername").value = "";
+
+  output.textContent = "Username updated successfully!";
+  output.style.color = "#36bd80";
+
+  // Refresh contact and conversation displays
+  startContacts();
+  startChats();
+
+ } catch(error) {
+  showError(output,error,"Updating username");
+ } finally {
+  button.disabled = false;
+  button.textContent = "Save username";
+ }
+});
+
+// Logout
 $("logoutButton").addEventListener("click",async()=>{
  try {
   await signOut(auth);
@@ -802,6 +1090,7 @@ $("logoutButton").addEventListener("click",async()=>{
   status(error.message);
  }
 });
+
 </script>
 </body>
 </html>
