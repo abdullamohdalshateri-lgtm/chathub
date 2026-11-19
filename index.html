@@ -1,0 +1,130 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChatHub</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101522;color:white;font-family:Arial,sans-serif}
+.app{max-width:480px;margin:auto;min-height:100vh;padding:25px}
+h1{color:#72a7ff}
+.card{background:#1c2638;padding:22px;border-radius:16px;margin-top:35px}
+input{width:100%;padding:14px;margin:8px 0;border:1px solid #39465e;border-radius:9px;background:#101522;color:white}
+button{width:100%;padding:14px;margin-top:12px;border:0;border-radius:9px;background:#4388ff;color:white;font-weight:bold}
+.secondary{background:#303d53}
+#chat{display:none}
+#messages{height:55vh;overflow:auto;background:#1c2638;padding:12px;border-radius:12px}
+.message{background:#303d53;padding:10px;border-radius:10px;margin:8px 0;overflow-wrap:anywhere}
+small{color:#aab7ca}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>ChatHub</h1>
+<p>Your conversations, all in one place.</p>
+
+<div id="auth" class="card">
+<h2 id="heading">Welcome back</h2>
+<input id="email" type="email" placeholder="Email">
+<input id="password" type="password" placeholder="Password">
+<button onclick="signIn()">Log in</button>
+<button class="secondary" onclick="signUp()">Create account</button>
+<p id="status"></p>
+</div>
+
+<div id="chat">
+<h2>Your messages</h2>
+<p id="account"></p>
+<div id="messages"></div>
+<input id="recipient" placeholder="Recipient user ID">
+<input id="message" placeholder="Write a message">
+<button onclick="sendMessage()">Send</button>
+<button class="secondary" onclick="logOut()">Log out</button>
+</div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import {
+ getAuth,onAuthStateChanged,createUserWithEmailAndPassword,
+ signInWithEmailAndPassword,signOut
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+import {
+ getFirestore,collection,addDoc,query,where,orderBy,onSnapshot,serverTimestamp
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+const firebaseConfig = {
+ apiKey: "PASTE_YOUR_API_KEY",
+ authDomain: "chathub-75a47.firebaseapp.com",
+ projectId: "chathub-75a47",
+ storageBucket: "chathub-75a47.firebasestorage.app",
+ messagingSenderId: "663781705692",
+ appId: "1:663781705692:web:78fb223c742db8d397b119"
+};
+
+const app=initializeApp(firebaseConfig);
+const auth=getAuth(app);
+const db=getFirestore(app);
+
+window.signIn=()=>createOrSignIn(false);
+window.signUp=()=>createOrSignIn(true);
+
+async function createOrSignIn(register){
+ const email=document.getElementById("email").value.trim();
+ const password=document.getElementById("password").value;
+ try{
+  if(register) await createUserWithEmailAndPassword(auth,email,password);
+  else await signInWithEmailAndPassword(auth,email,password);
+ }catch(e){document.getElementById("status").textContent=e.message}
+}
+
+onAuthStateChanged(auth,user=>{
+ document.getElementById("auth").style.display=user?"none":"block";
+ document.getElementById("chat").style.display=user?"block":"none";
+ if(user) document.getElementById("account").textContent="Signed in as "+user.email;
+});
+
+window.logOut=()=>signOut(auth);
+
+window.sendMessage=async()=>{
+ const user=auth.currentUser;
+ const recipient=document.getElementById("recipient").value.trim();
+ const message=document.getElementById("message").value.trim();
+ if(!recipient||!message)return;
+ try{
+  await addDoc(collection(db,"messages"),{
+   senderId:user.uid,
+   recipientId:recipient,
+   members:[user.uid,recipient],
+   text:message,
+   createdAt:serverTimestamp()
+  });
+  document.getElementById("message").value="";
+ }catch(e){alert(e.message)}
+};
+
+let unsubscribe;
+onAuthStateChanged(auth,user=>{
+ if(unsubscribe)unsubscribe();
+ if(!user)return;
+ const q=query(collection(db,"messages"),
+  where("members","array-contains",user.uid),
+  orderBy("createdAt","asc"));
+ unsubscribe=onSnapshot(q,snapshot=>{
+  const box=document.getElementById("messages");
+  box.innerHTML="";
+  snapshot.forEach(doc=>{
+   const data=doc.data();
+   const div=document.createElement("div");
+   div.className="message";
+   div.textContent=(data.senderId===user.uid?"You: ":"Them: ")+data.text;
+   box.appendChild(div);
+  });
+  box.scrollTop=box.scrollHeight;
+ });
+});
+</script>
+</body>
+</html>
