@@ -46,7 +46,7 @@ button {
   color:white;
   font-weight:700;
 }
-button:disabled {opacity:.5}
+button:disabled {opacity:.5;cursor:not-allowed}
 input {
   width:100%;
   padding:14px;
@@ -169,7 +169,12 @@ select {
   color:var(--text);
   border:1px solid var(--border);
 }
-#status {color:var(--muted);font-size:13px;min-height:20px}
+#status,#profileStatus,#messageStatus {
+  color:var(--muted);
+  font-size:13px;
+  min-height:20px;
+  overflow-wrap:anywhere;
+}
 @media(max-width:650px) {
   #appView {padding:15px}
   .layout {grid-template-columns:1fr}
@@ -308,7 +313,6 @@ import {
 } from
  "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// Use the Firebase configuration from your project.
 const firebaseConfig = {
  apiKey: "AIzaSyCfY261bu8-qzxV6WGTqp8PqKu0D-i406Y",
  authDomain: "chathub-75a47.firebaseapp.com",
@@ -323,6 +327,7 @@ const auth=getAuth(app);
 const db=getFirestore(app);
 
 const $=id=>document.getElementById(id);
+
 let currentUser=null;
 let currentProfile=null;
 let currentChat=null;
@@ -335,6 +340,12 @@ function status(message) {
  $("status").textContent=message;
 }
 
+function showError(element,error,stage) {
+ console.error(stage,error);
+ element.textContent=
+  stage+" — "+(error.code||"Error")+": "+error.message;
+}
+
 function applyTheme() {
  const saved=localStorage.getItem("chathub-theme")||"system";
  const systemDark=window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -342,6 +353,7 @@ function applyTheme() {
  document.documentElement.dataset.theme=theme;
  if($("themeSelect")) $("themeSelect").value=saved;
 }
+
 applyTheme();
 
 $("themeSelect").addEventListener("change",e=>{
@@ -357,7 +369,9 @@ window.matchMedia("(prefers-color-scheme: dark)")
 
 function showPage(name) {
  ["contacts","search","chats","settings","conversation"]
- .forEach(page=>$(`${page}Page`).classList.toggle("hidden",page!==name));
+ .forEach(page=>{
+  $(`${page}Page`).classList.toggle("hidden",page!==name);
+ });
 
  document.querySelectorAll("nav button").forEach(button=>{
   button.classList.toggle("active",button.dataset.page===name);
@@ -378,12 +392,14 @@ function makeItem(name,detail,buttonText,action) {
 
  const info=document.createElement("div");
  info.className="itemInfo";
+
  const strong=document.createElement("strong");
  strong.textContent=name;
+
  const small=document.createElement("small");
  small.textContent=detail||"";
- info.append(strong,small);
 
+ info.append(strong,small);
  item.append(avatar,info);
 
  if(buttonText) {
@@ -392,6 +408,7 @@ function makeItem(name,detail,buttonText,action) {
   button.addEventListener("click",action);
   item.append(button);
  }
+
  return item;
 }
 
@@ -404,17 +421,21 @@ function stopListeners() {
 
 async function createProfile(username) {
  username=username.trim().replace(/^@/,"");
+
  if(!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
   throw new Error("Use 3–20 letters, numbers or underscores.");
  }
 
  const usernameLower=username.toLowerCase();
+
  const existing=await getDocs(query(
   collection(db,"profiles"),
   where("usernameLower","==",usernameLower)
  ));
 
- if(!existing.empty) throw new Error("That username is already taken.");
+ if(!existing.empty) {
+  throw new Error("That username is already taken.");
+ }
 
  await setDoc(doc(db,"profiles",currentUser.uid),{
   uid:currentUser.uid,
@@ -429,6 +450,7 @@ async function createProfile(username) {
   username,
   email:currentUser.email
  };
+
  showApp();
 }
 
@@ -459,6 +481,7 @@ onAuthStateChanged(auth,async user=>{
 
  try {
   const profile=await getDoc(doc(db,"profiles",user.uid));
+
   if(profile.exists()) {
    currentProfile=profile.data();
    showApp();
@@ -468,7 +491,7 @@ onAuthStateChanged(auth,async user=>{
    $("profileSetup").classList.remove("hidden");
   }
  } catch(error) {
-  $("profileStatus").textContent=error.message;
+  showError($("profileStatus"),error,"Loading profile");
  }
 });
 
@@ -484,11 +507,15 @@ $("switchAuth").addEventListener("click",()=>{
 $("authButton").addEventListener("click",async()=>{
  const email=$("email").value.trim().toLowerCase();
  const password=$("password").value;
+
  status("Please wait...");
 
  try {
   if(isRegister) {
-   if(!$("username").value.trim()) throw new Error("Choose a username first.");
+   if(!$("username").value.trim()) {
+    throw new Error("Choose a username first.");
+   }
+
    const result=await createUserWithEmailAndPassword(auth,email,password);
    currentUser=result.user;
    await createProfile($("username").value);
@@ -496,7 +523,7 @@ $("authButton").addEventListener("click",async()=>{
    await signInWithEmailAndPassword(auth,email,password);
   }
  } catch(error) {
-  status(error.message);
+  status(error.code ? error.code+": "+error.message : error.message);
  }
 });
 
@@ -505,7 +532,7 @@ $("saveProfile").addEventListener("click",async()=>{
   $("profileStatus").textContent="Saving...";
   await createProfile($("setupUsername").value);
  } catch(error) {
-  $("profileStatus").textContent=error.message;
+  showError($("profileStatus"),error,"Saving profile");
  }
 });
 
@@ -528,7 +555,10 @@ async function searchUsers() {
   ]);
 
   const found=new Map();
-  [...byUsername.docs,...byEmail.docs].forEach(d=>found.set(d.id,d.data()));
+
+  [...byUsername.docs,...byEmail.docs].forEach(d=>{
+   found.set(d.id,d.data());
+  });
 
   found.delete(currentUser.uid);
 
@@ -538,33 +568,44 @@ async function searchUsers() {
   }
 
   for(const person of found.values()) {
-   const contact=await getDoc(doc(db,"users",currentUser.uid,"contacts",person.uid));
+   const contact=await getDoc(
+    doc(db,"users",currentUser.uid,"contacts",person.uid)
+   );
+
    results.append(makeItem(
     person.username,
     person.email,
     contact.exists()?"Added":"Add",
     async()=>{
-     if(contact.exists()) return;
+     if(contact.exists())return;
+
      try {
-      await setDoc(doc(db,"users",currentUser.uid,"contacts",person.uid),{
-       uid:person.uid,
-       username:person.username,
-       email:person.email,
-       createdAt:serverTimestamp()
-      });
+      await setDoc(
+       doc(db,"users",currentUser.uid,"contacts",person.uid),
+       {
+        uid:person.uid,
+        username:person.username,
+        email:person.email,
+        createdAt:serverTimestamp()
+       }
+      );
+
       searchUsers();
      } catch(error) {
-      alert(error.message);
+      results.textContent=
+       "Adding contact failed: "+(error.code||"Error")+" — "+error.message;
      }
     }
    ));
   }
  } catch(error) {
-  results.textContent=error.message;
+  results.textContent=
+   "Search failed: "+(error.code||"Error")+" — "+error.message;
  }
 }
 
 $("searchButton").addEventListener("click",searchUsers);
+
 $("userSearch").addEventListener("keydown",e=>{
  if(e.key==="Enter")searchUsers();
 });
@@ -583,6 +624,7 @@ function startContacts() {
 
    snapshot.forEach(contact=>{
     const person=contact.data();
+
     list.append(makeItem(
      person.username,
      person.email,
@@ -591,14 +633,18 @@ function startContacts() {
     ));
    });
   },
-  error=>{$("contactsList").textContent=error.message;}
+  error=>{
+   showError($("contactsList"),error,"Loading contacts");
+  }
  );
 }
 
 function startChats() {
  stopChats=onSnapshot(
-  query(collection(db,"chats"),
-   where("members","array-contains",currentUser.uid)),
+  query(
+   collection(db,"chats"),
+   where("members","array-contains",currentUser.uid)
+  ),
   snapshot=>{
    const list=$("chatList");
    list.replaceChildren();
@@ -611,29 +657,51 @@ function startChats() {
    snapshot.forEach(chatDoc=>{
     const chat=chatDoc.data();
     const otherId=chat.members.find(id=>id!==currentUser.uid);
+
     getDoc(doc(db,"profiles",otherId)).then(profile=>{
      if(!profile.exists())return;
+
      list.append(makeItem(
       profile.data().username,
       chat.lastMessage||"Start a conversation",
       "Open",
       ()=>openChat(profile.data())
      ));
+    }).catch(error=>{
+     showError(list,error,"Loading chat profile");
     });
    });
   },
-  error=>{$("chatList").textContent=error.message;}
+  error=>{
+   showError($("chatList"),error,"Loading conversations");
+  }
  );
 }
 
 async function openChat(person) {
+ const messageStatus=$("messageStatus");
+ messageStatus.textContent="Opening conversation...";
+
+ $("conversationTitle").textContent=person.username;
+ $("messages").replaceChildren();
+ showPage("conversation");
+
  try {
+  if(!person.uid) {
+   throw new Error("This contact is missing its user ID.");
+  }
+
   const members=[currentUser.uid,person.uid].sort();
   const chatId=members.join("_");
   const chatRef=doc(db,"chats",chatId);
+
+  messageStatus.textContent="Checking conversation...";
+
   const existing=await getDoc(chatRef);
 
   if(!existing.exists()) {
+   messageStatus.textContent="Creating conversation...";
+
    await setDoc(chatRef,{
     members,
     createdBy:currentUser.uid,
@@ -642,14 +710,15 @@ async function openChat(person) {
   }
 
   currentChat=chatId;
-  $("conversationTitle").textContent=person.username;
-  showPage("conversation");
+  messageStatus.textContent="";
 
   if(stopMessages)stopMessages();
 
   stopMessages=onSnapshot(
-   query(collection(db,"chats",chatId,"messages"),
-    orderBy("createdAt","asc")),
+   query(
+    collection(db,"chats",chatId,"messages"),
+    orderBy("createdAt","asc")
+   ),
    snapshot=>{
     const box=$("messages");
     box.replaceChildren();
@@ -657,53 +726,82 @@ async function openChat(person) {
     snapshot.forEach(messageDoc=>{
      const message=messageDoc.data();
      const bubble=document.createElement("div");
-     bubble.className="bubble"+(
-      message.senderId===currentUser.uid?" mine":""
-     );
+
+     bubble.className="bubble"+
+      (message.senderId===currentUser.uid?" mine":"");
+
      bubble.textContent=message.text;
      box.append(bubble);
     });
+
     box.scrollTop=box.scrollHeight;
    },
-   error=>{$("messageStatus").textContent=error.message;}
+   error=>{
+    showError(messageStatus,error,"Loading messages");
+   }
   );
+
  } catch(error) {
-  alert(error.message);
+  currentChat=null;
+  showError(messageStatus,error,"Opening conversation");
  }
 }
 
 $("messageForm").addEventListener("submit",async e=>{
  e.preventDefault();
+
  const text=$("messageInput").value.trim();
+
  if(!text||!currentChat)return;
 
- try {
-  await addDoc(collection(db,"chats",currentChat,"messages"),{
-   senderId:currentUser.uid,
-   text,
-   createdAt:serverTimestamp()
-  });
+ const sendButton=$("messageForm").querySelector("button");
+ sendButton.disabled=true;
+ $("messageStatus").textContent="Sending...";
 
-  await setDoc(doc(db,"chats",currentChat),{
-   lastMessage:text,
-   lastMessageAt:serverTimestamp()
-  },{merge:true});
+ try {
+  await addDoc(
+   collection(db,"chats",currentChat,"messages"),
+   {
+    senderId:currentUser.uid,
+    text,
+    createdAt:serverTimestamp()
+   }
+  );
+
+  await setDoc(
+   doc(db,"chats",currentChat),
+   {
+    lastMessage:text,
+    lastMessageAt:serverTimestamp()
+   },
+   {merge:true}
+  );
 
   $("messageInput").value="";
   $("messageStatus").textContent="";
+
  } catch(error) {
-  $("messageStatus").textContent=error.message;
+  showError($("messageStatus"),error,"Sending message");
+ } finally {
+  sendButton.disabled=false;
  }
 });
 
 $("backButton").addEventListener("click",()=>{
  if(stopMessages)stopMessages();
+ stopMessages=null;
  currentChat=null;
+ $("messageStatus").textContent="";
  showPage("chats");
 });
 
-$("logoutButton").addEventListener("click",()=>signOut(auth));
-
+$("logoutButton").addEventListener("click",async()=>{
+ try {
+  await signOut(auth);
+ } catch(error) {
+  status(error.message);
+ }
+});
 </script>
 </body>
 </html>
